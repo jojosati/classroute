@@ -1,0 +1,77 @@
+------------
+classroute 
+-------------
+    a "route" decorator replacement for bottle,
+    plus ability to wrap class definition.
+
+    example:
+
+    class A(object) :
+       def __init__(self,name='World') :
+            self.name = name
+
+       def hello(self,name=None) :
+           yield 'Hello '
+           yield name or self.Name
+
+    # bind to "/hello","/hello/<name>"
+    @classroute
+    class A1(A) :
+       pass
+
+    # bind to "/a2/hello","/a2/hello/<name>"
+    @classroute('{$class}',['POST','GET'])
+    class A2(A) :
+       pass
+
+    # bind to "/a/hello","/a/hello/<name>","/aa/hello","/aa/<name>"
+    # same as @classroute(['/aa','/a')
+    @classroute('/a')
+    @classroute('/aa')
+    class A3(A):
+      pass
+
+    # bind different root with different instance of same class
+    # bind to "/john/hello","/john/hello/<name>"
+    classroute('john')(A)('john')
+    # bind to "/jane/hello","/jane/hello/<name>"
+    classroute('jane')(A)('jane')
+
+    #with helper function "mroute" and "skiproute"
+    #fine tune for individual method in the class is possible.
+    # bind to "/b/hello","/b/hello/<name>","/b/say/hello","/b/say/hello/<name>"
+    @classroute('{$class}')
+    class B(A):
+        @mroute('{$root}/say/hello',['GET','POST'])
+        def say__hi(self,name=None) :
+              redirect('{$root}/hello/{0}',name or self.name,**self.__routeitems__)
+
+       @skiproute
+        def myfunc(self) :
+            pass
+
+    # or use as route replacement
+    @classroute(['/','/index'])
+    def index() :
+        redirect('/hello')
+
+----------
+PathItem 
+-----------
+    a str represent for path variable  {$root},{$class},{$name}  
+    with some chained-transformable features as :
+        .content - content only strip '/'
+        .path - empty or content + starts with '/'
+        .dir - path + ends with '/'
+        .low - lower case
+        .up - uppercase
+        .title - capitalize first letter
+        .normpath - same path with replacement of '__' to '/'
+        .normpathlow - normpath + low
+        .value - the original value
+        .items - split path to selectable item as {$name.items[0].up}
+    all features is chainable
+    example:
+        >>> "{0.normpath.content.items[0].title}".format(PathItem('//abc__def__'))
+        'Abc'
+ 
