@@ -1,10 +1,25 @@
-------------
-classroute 
--------------
-    a "route" decorator replacement for bottle,
-    plus ability to wrap class definition.
 
-    example:
+classroute 
+    is a "route" decorator replacement for bottle,
+    plus ability to wrap class definition and instance method.
+
+    can safely use @classroute as replacement of @route
+
+classroute can use with function like route.
+classroute can use with class definition.
+classroute can use with instance method.
+classroute use bottle's yieldroutes function to generate path,
+    with special handling to skip first argument of class instance in the method.
+classroute can auto bind to directory path for 'index' function/method.
+classroute support "PathItem" variable "{$root}","{$class}","{$name}",
+    "PathItem" variable can use chained property like "{$root.normpath.up} "
+
+------------
+classroute example
+-------------
+    from classroute import *
+
+    debug() # enable verbose route path binding
 
     class A(object) :
        def __init__(self,name='World') :
@@ -46,20 +61,37 @@ classroute
         def say__hi(self,name=None) :
               redirect('{$root}/hello/{0}',name or self.name,**self.__routeitems__)
 
-       @skiproute
+        @skiproute
         def myfunc(self) :
-            pass
+            yield 'myfunc'
 
-    # or use as route replacement
-    @classroute(['/','/index'])
+    # or use as route replacement, with special meaning of 'index'
+    # bind to "/","/index"
+    @classroute
     def index() :
         redirect('/hello')
+
+    # also support for late binding to instance's method
+    # bind to "/a/marcel"
+    classroute('{$class}/marcel')(A('Marcel').hello)
+
+    # create instance, to bind all route definition
+    A1()
+    A2()
+    A3()
+    b = B()
+
+    # force binding to @skiproute method
+    # bind to "/myfunc"
+    classroute(b.myfunc)
+
+    run() #start bottle
 
 ----------
 PathItem 
 -----------
     a str represent for path variable  {$root},{$class},{$name}  
-    with some chained-transformable features as :
+    with some chained-transformable properties as :
         .content - content only strip '/'
         .path - empty or content + starts with '/'
         .dir - path + ends with '/'
@@ -70,7 +102,7 @@ PathItem
         .normpathlow - normpath + low
         .value - the original value
         .items - split path to selectable item as {$name.items[0].up}
-    all features is chainable
+    all properties are chainable
     example:
         >>> "{0.normpath.content.items[0].title}".format(PathItem('//abc__def__'))
         'Abc'
