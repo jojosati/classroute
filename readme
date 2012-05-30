@@ -7,16 +7,17 @@ classroute
 
 classroute can use with function like route.
 classroute can use with class definition.
-classroute can use with instance method.
+classroute can use with instance method (late binding).
+classroute can use with instance (late binding).
 classroute use bottle's yieldroutes function to generate path,
     with special handling to skip first argument of class instance in the method.
 classroute can auto bind to directory path for 'index' function/method.
 classroute support "PathItem" variable "{$root}","{$class}","{$name}",
     "PathItem" variable can use chained property like "{$root.normpath.up} "
 
-------------
+---------------------
 classroute example
--------------
+----------------------
     from classroute import *
 
     debug() # enable verbose route path binding
@@ -27,7 +28,7 @@ classroute example
 
        def hello(self,name=None) :
            yield 'Hello '
-           yield name or self.Name
+           yield name or self.name
 
     # bind to "/hello","/hello/<name>"
     @classroute
@@ -71,21 +72,26 @@ classroute example
     def index() :
         redirect('/hello')
 
-    # also support for late binding to instance's method
-    # bind to "/a/marcel"
-    classroute('{$class}/marcel')(A('Marcel').hello)
-
     # create instance, to bind all route definition
     A1()
     A2()
     A3()
     b = B()
 
-    # force binding to @skiproute method
+    # support for late binding to individual instance's method
+    # bind to "/a-bottle"
+    classroute('{$class}-bottle')(A('Bottle').hello)
+
+    # force late binding to @skiproute method
     # bind to "/myfunc"
     classroute(b.myfunc)
 
-    run() #start bottle
+    # also support for late binding to instance
+    # bind to "/bottle/..."
+    classroute('/bottle')(A('Bottle'))
+
+    # start server
+    run()
 
 ----------
 PathItem 

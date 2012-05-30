@@ -12,13 +12,14 @@
 
 '''
 classroute
-a "route" decorator replacement for bottle,
-plus ability to wrap class definition and instance method.
+is a "route" decorator replacement for bottle,
+plus ability to wrap class definition
+or binding route to an instance or specfic instance method.
 '''
 
 from bottle import *
 
-__version__ = '0.01.01'
+__version__ = '0.01.02'
 
 
 def normalizepath(p) :
@@ -169,7 +170,24 @@ def classroute(*ra,**rka) :
         path = rka.pop('path',None)
         path = (ra or [path])[0]
         cra = (ra or (None,))[1:]
+
+        # --- helper/wrapper functions ---
         # method callback wrapper
+        def pathvars(*a,**ka) :
+            # default transform .path, .normpathlow, .normpath
+            kdef = [('$root',3),('$class',1),('$name',2)]
+            for k,d,v in zip(*zip(*kdef)+[a]):
+                if v is None :
+                    v = ka.get(k,'')
+                if not isinstance(v,PathItem) :
+                    v = PathItem(v,d)
+                ka[k] = v
+
+            for k,v in ka.items() :
+                if not isinstance(v,PathItem) :
+                    ka[k] = PathItem(v)
+            return ka
+
         def mcallback(fn) :
             return lambda *ma,**mka: fn(*ma,**mka)
         def mname(fn) :
@@ -177,45 +195,15 @@ def classroute(*ra,**rka) :
             if ismethod(fn) :
                 n = fn.im_class.__name__ +'.'+n
             return n
-        # check if not a class, pass to default route
-        if not isinstance(callback,type) :
-            if not path :
-                path = list(yieldclassroutes(callback))
-            ritems = {
-                '$name' : PathItem(callback.__name__,2), #normpath
-                '$root' : '',
-                    }
-            if ismethod(callback) :
-                ritems.update({
-                        '$class' : PathItem(callback.im_class.__name__,1), #normpathlow
-                        })
-            if path :
-                path = [_x.format( **ritems) for _x in makelist(path)]
-
-            if DEBUG:
-                rm = rka.get('method',cra[0] if cra else 'route')
-                print '{2} {0}():{1}'.format(
-                            mname(callback),
-                            '\n  '.join(['']+(path or '/.*')),
-                            rm)
-            return route(path,*cra,**rka)(mcallback(callback))
-
-        classpath = callback.__name__
-
-
         def routeinit(self,path,cra,rka) :
+            classpath = type(self).__name__
             rootpath = (path or '').rstrip('/')\
-                        .format(**{
-                            '$class':PathItem(classpath,1),  #normpathlow
-                            })
+                        .format(**pathvars('',classpath))
 
             # route items, may override by class's __init__
             if not hasattr(self,'__routeitems__') :
                 self.__routeitems__ = MultiDict()
-            self.__routeitems__.update({
-                    '$root': PathItem(rootpath,3), #path
-                    '$class': PathItem(classpath,1),  #normpathlow
-                    })
+            self.__routeitems__.update(pathvars(rootpath,classpath))
 
             # add route for all method in class
             for n in dir(self) :
@@ -259,9 +247,7 @@ def classroute(*ra,**rka) :
 
                     # formatting route variable
                     if mpaths :
-                        methodpath =  normalizepath(m.__name__)
-                        ritems = {'$name' : PathItem(methodpath,2)} #normpath
-                        ritems.update(self.__routeitems__)
+                        ritems = pathvars(None,None,m.__name__,**self.__routeitems__)
                         mpaths = [_x.format(**ritems) for _x in mpaths]
 
                     if DEBUG:
@@ -277,11 +263,38 @@ def classroute(*ra,**rka) :
                 # push back original method
                 # to support multiple instances
                 baseinit(self,*a,**ka)
+                self.__class__.__init__ = baseinit
                 # support collection of paths
                 for p in makelist(path) or [None] :
                     routeinit(self,p,cra,rka)
-                self.__class__.__init__ = baseinit
             return wrapper
+        # ----- end helper/wrapper functions ------
+
+        # check if not a class, pass to default route
+        if not isinstance(callback,type) :
+            if not callable(callback) \
+                and type(callback).__name__ not in __builtins__:
+                # bind to an instance
+                # support collection of paths
+                for p in makelist(path) or [None] :
+                    routeinit(callback,p,cra,rka)
+                return callback
+
+            if not path :
+                path = list(yieldclassroutes(callback))
+            ritems = pathvars('','',callback.__name__)
+            if ismethod(callback) :
+                ritems = pathvars(None,callback.im_class.__name__,**ritems)
+            if path :
+                path = [_x.format( **ritems) for _x in makelist(path)]
+
+            if DEBUG:
+                rm = rka.get('method',cra[0] if cra else 'route')
+                print '{2} {0}():{1}'.format(
+                            mname(callback),
+                            '\n  '.join(['']+(path or '/.*')),
+                            rm)
+            return route(path,*cra,**rka)(mcallback(callback))
         callback.__init__ = initwrap(path,cra,rka,callback.__init__)
         return callback
 
@@ -298,7 +311,7 @@ if __name__ == '__main__':
 
        def hello(self,name=None) :
            yield 'Hello '
-           yield name or self.Name
+           yield name or self.name
 
     # bind to "/hello","/hello/<name>"
     @classroute
@@ -342,19 +355,24 @@ if __name__ == '__main__':
     def index() :
         redirect('/hello')
 
-    # also support for late binding to instance's method
-    # bind to "/a/marcel"
-    classroute('{$class}/marcel')(A('Marcel').hello)
-
     # create instance, to bind all route definition
     A1()
     A2()
     A3()
     b = B()
 
-    # force binding to @skiproute method
+    # support for late binding to individual instance's method
+    # bind to "/a-bottle"
+    classroute('{$class}-bottle')(A('Bottle').hello)
+
+    # force late binding to @skiproute method
     # bind to "/myfunc"
     classroute(b.myfunc)
 
+    # also support for late binding to instance
+    # bind to "/bottle/..."
+    classroute('/bottle')(A('Bottle'))
+
+    # start server
     run()
 
