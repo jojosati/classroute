@@ -1,19 +1,20 @@
 
-classroute 
+classroute
     is a "route" decorator replacement for bottle,
-    plus ability to wrap class definition and instance method.
+    with ability to wrap whole class definition
+    or late binding to a class instance or specfic instance method.
 
     can safely use @classroute as replacement of @route
 
-classroute can use with function like route.
+classroute can use with function like original route.
 classroute can use with class definition.
 classroute can use with instance method (late binding).
-classroute can use with instance (late binding).
+classroute can use with class instance (late binding).
 classroute use bottle's yieldroutes function to generate path,
     with special handling to skip first argument of class instance in the method.
-classroute can auto bind to directory path for 'index' function/method.
+classroute can auto bind to directory path for function/method named 'index'.
 classroute support "PathItem" variable "{$root}","{$class}","{$name}",
-    "PathItem" variable can use chained property like "{$root.normpath.up} "
+    "PathItem" variable can use chained property like "{$root.@lower} "
 
 ---------------------
 classroute example
@@ -55,7 +56,7 @@ classroute example
 
     #with helper function "mroute" and "skiproute"
     #fine tune for individual method in the class is possible.
-    # bind to "/b/hello","/b/hello/<name>","/b/say/hello","/b/say/hello/<name>"
+    # bind to "/B/hello","/B/hello/<name>","/B/say/hello","/B/say/hello/<name>"
     @classroute('{$class}')
     class B(A):
         @mroute('{$root}/say/hello',['GET','POST'])
@@ -63,8 +64,10 @@ classroute example
               redirect('{$root}/hello/{0}',name or self.name,**self.__routeitems__)
 
         @skiproute
-        def myfunc(self) :
+        def myfunc(self,name='') :
             yield 'myfunc'
+            if name :
+                yield ' ('+name+')'
 
     # or use as route replacement, with special meaning of 'index'
     # bind to "/","/index"
@@ -83,33 +86,35 @@ classroute example
     classroute('{$class}-bottle')(A('Bottle').hello)
 
     # force late binding to @skiproute method
-    # bind to "/myfunc"
-    classroute(b.myfunc)
+    # bind to "/my","/my/:name"
+    classroute('/my/**')(b.myfunc)
 
     # also support for late binding to instance
     # bind to "/bottle/..."
     classroute('/bottle')(A('Bottle'))
 
-    # start server
+    #start server
     run()
 
+
 ----------
-PathItem 
+PathItem
 -----------
-    a str represent for path variable  {$root},{$class},{$name}  
-    with some chained-transformable properties as :
-        .content - content only strip '/'
-        .path - empty or content + starts with '/'
-        .dir - path + ends with '/'
-        .low - lower case
-        .up - uppercase
-        .title - capitalize first letter
-        .normpath - same path with replacement of '__' to '/'
-        .normpathlow - normpath + low
-        .value - the original value
-        .items - split path to selectable item as {$name.items[0].up}
+    a str represent for path variable  {$root},{$class},{$name}
+    with support property-like access to all method of str via
+    ".@methodname" or ".@methodname(argument)" .
+    example :
+        >>> '{0.@title}'.format(PathItem('hello john'))
+        'Helo John'
+        >>> '{0.@split(" ")[-1]}'.format(PathItem('hello john'))
+        'john'
+    and more path related method
+        .@path     - tranform to path format  "/xxxx".
+        .@path(True) - path transform with normalize "__" to "/".
+        .@items[n] - same as split("/") but element in items is PathItem.
+        .@value - original value
+
     all properties are chainable
     example:
-        >>> "{0.normpath.content.items[0].title}".format(PathItem('//abc__def__'))
+        >>> "{0.@path(True).@strip('/').@items[0].@title}".format(PathItem('//abc__def__'))
         'Abc'
- 

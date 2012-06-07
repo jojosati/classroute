@@ -12,134 +12,68 @@
 
 '''
 classroute
-is a "route" decorator replacement for bottle,
-plus ability to wrap class definition
-or binding route to an instance or specfic instance method.
+    is a "route" decorator replacement for bottle,
+    with ability to wrap whole class definition
+    or late binding to a class instance or specfic instance method.
 '''
 
 from bottle import *
 
-__version__ = '0.01.02'
+__version__ = '0.01.03'
 
-
-def normalizepath(p) :
-    return ('/' + p.replace('__','/').strip('/')).rstrip('/')
-
-
-class PathItem(object):
+class PathItem(str) :
     '''
-    PathItem - a str represent for path variable  {$root},{$class},{$name}
-    with some chained-transformable features as :
-        .content - content only strip '/'
-        .path - empty or content + starts with '/'
-        .dir - path + ends with '/'
-        .low - lower case
-        .up - uppercase
-        .title - capitalize first letter
-        .normpath - same path with replacement of '__' to '/'
-        .normpathlow - normpath + low
-        .value - the original value
-        .items - split path to selectable item as {$name.items[0].up}
-    all features is chainable
-    example:
-        >>> "{0.normpath.content.items[0].title}".format(PathItem('//abc__def__'))
-        'Abc'
+    add ability to access method via attribute style in str.format
+    example :
+        >>> '{0.@lower.@path}'.format('Hello')
+        '/hello
     '''
-    def __init__(self,value,default=None) :
-        self._value = value
-        self._default = default
+    def __getattr__(self,attr,*default) :
+        if attr[0]=='@' :
+            # add support str.format to access method as attribute
+            if attr[-1]!=')' :
+                attr += '()' # short call without "()"
+            x = eval('self.'+attr[1:])
+            if isinstance(x,basestring) :
+                x = type(self)(x) # to support chained attribute
+            return x
+        if default :
+            return default[0]
+        raise AttributeError(attr)
 
-    @property
-    def _content(self) :
-        return self._value.strip('/')
+    def path(self,normalize=False,lower=False) :
+        x = self
+        if normalize :
+            x = x.replace('__','/')
+        if lower :
+            x = x.lower()
+        return ('/' + x.strip('/')).rstrip('/')
 
-    @property
-    def _path(self) :
-        return ('/'+self._content).rstrip('/')
+    def value(self) :
+        '''
+        return original value
+        '''
+        return str.__str__(self)
 
-    @property
-    def _normpath(self) :
-        return normalizepath(self._value)
-
-    @property
-    def _normpathlow(self) :
-        return self._normpath.lower()
+    def view(self,*view) :
+        '''
+        setting default view
+        '''
+        if view :
+            self._view = '.'.join(view)
+        return self
 
     def __str__(self) :
-        if callable(self._default) :
-            return self._default(self)
-        if isinstance(self._default,basestring) :
-            return self._default
-        if self._default == 1 :
-            return self._normpathlow
-        if self._default == 2 :
-            return self._normpath
-        return self._path if self._default else self._value
+        '''
+        return default view or original value
+        '''
+        v = getattr(self,'_view',None)
+        if v :
+            return ('{0.'+v+'}').format(self)
+        return self.value()
 
-    @property
-    def value(self) :
-        return PathItem(self._value)
-
-    @property
-    def p(self) :
-        return PathItem(self.__str__())
-
-    @property
-    def content(self) :
-        return PathItem(self._content)
-
-    @property
-    def path(self) :
-        return PathItem(self._path)
-
-    @property
-    def dir(self) :
-        return PathItem(self._path+'/')
-
-    @property
-    def normpath(self) :
-        return PathItem(self._normpath)
-
-    @property
-    def normpathlow(self) :
-        return PathItem(self._normpathlow)
-
-    @property
-    def up(self) :
-        return PathItem(self._value.upper())
-
-    @property
-    def low(self) :
-        return PathItem(self._value.lower())
-
-    @property
-    def title(self) :
-        return PathItem(self._value.title())
-
-    @property
-    def normalize(self) :
-        return PathItem(normalizepath(self._value))
-
-    @property
-    def items(self) :
-        return [PathItem(x) for x in self._value.split('/')]
-
-def ismethod(callback) :
-    return callable(callback) and hasattr(callback,'im_class')
-
-def yieldclassroutes(callback):
-    ism = ismethod(callback)
-    re_skipfirst = r'(?:\/\:[^/]*|\/\<.*\>)(?=[$/]?)'
-    cnt = 0
-    for p in yieldroutes(callback) :
-        if ism :
-            p = '{$root}' + ''.join(re.split(re_skipfirst,p,1))
-        if not cnt and p.endswith('/index') :
-            yield p.rsplit('/',1)[0]+'/'
-            cnt += 1
-        yield p
-        cnt += 1
-
+    def items(self,chr='/',*a,**ka) :
+        return [type(self)(x) for x in self.split(chr,*a,**ka)]
 
 def mroute(*a,**ka) :
     def decorator(callback) :
@@ -156,6 +90,7 @@ def skiproute(callback) :
 def classroute(*ra,**rka) :
     from bottle import DEBUG
 
+    app = rka.pop('app',None) # app to be routed
     callback = rka.pop('callback',None)
     if len(ra)>=3 :
         callback = ra[2]
@@ -172,15 +107,39 @@ def classroute(*ra,**rka) :
         cra = (ra or (None,))[1:]
 
         # --- helper/wrapper functions ---
-        # method callback wrapper
+        def ismethod(callback) :
+            return callable(callback) and hasattr(callback,'im_class')
+
+        def yieldclassroutes(callback,*basepath):
+            re_skipfirst = r'(?:\/\:[^/]*|\/\<.*\>)(?=[$/]?)'
+            re_args = r'\/(?=[:<])'
+            if basepath :
+                for p in basepath :
+                    if not p.endswith('/**') :
+                        yield p
+                        continue
+                    p = p.rsplit('/',1)[0]
+                    for a in yieldclassroutes(callback) :
+                        yield '/'.join([p]+re.split(re_args,a,1)[1:])
+                return
+            ism = ismethod(callback)
+            cnt = 0
+            for p in yieldroutes(callback) :
+                if ism :
+                    p = '{$root}' + ''.join(re.split(re_skipfirst,p,1))
+                if not cnt and p.endswith('/index') :
+                    yield p.rsplit('/',1)[0]+'/'
+                    cnt += 1
+                yield p
+                cnt += 1
+
         def pathvars(*a,**ka) :
-            # default transform .path, .normpathlow, .normpath
-            kdef = [('$root',3),('$class',1),('$name',2)]
+            kdef = [('$root','@path'),('$class','@path(True)'),('$name','@path(True)')]
             for k,d,v in zip(*zip(*kdef)+[a]):
                 if v is None :
                     v = ka.get(k,'')
                 if not isinstance(v,PathItem) :
-                    v = PathItem(v,d)
+                    v = PathItem(v).view(d)
                 ka[k] = v
 
             for k,v in ka.items() :
@@ -190,6 +149,7 @@ def classroute(*ra,**rka) :
 
         def mcallback(fn) :
             return lambda *ma,**mka: fn(*ma,**mka)
+
         def mname(fn) :
             n = fn.__name__
             if ismethod(fn) :
@@ -222,6 +182,8 @@ def classroute(*ra,**rka) :
                         # skip route for this method
                         continue
 
+                # use arguments from @mroute decorator
+                # or classroute decorator.
                 for mra,mrka in getattr(m,'__routeargs__',
                                     [((None,)+(cra or tuple()),rka or {})]) :
                     mpaths = []
@@ -231,19 +193,9 @@ def classroute(*ra,**rka) :
                     if p :
                         mpaths = makelist(p)
 
-                    if not mpaths :
-                        # try to parse __doc__ (undoc&never use?)
-                        # for @route declaration within method or within class
-                        re_route = r'(?:^\s*|\s+)\@mroute\s*\=(.*)'
-                        docroutes = re.split(re_route, m.__doc__ or '')[1::2] \
-                                or re.split(re_route, self.__class__.__doc__ or '')[1::2]
-                        for x in map(eval,docroutes) :
-                            mpaths.extend(makelist(x))
-
-                    if not mpaths :
-                        # if no declaration, use yieldroutes to generate route
-                        # note: needs skip first arguments of class method.
-                        mpaths.extend(yieldclassroutes(m))
+                    # if no mpath, use yieldroutes to generate route
+                    # otherwise, yield that mpath with /** transforms
+                    mpaths = list(yieldclassroutes(m,*mpaths))
 
                     # formatting route variable
                     if mpaths :
@@ -255,7 +207,7 @@ def classroute(*ra,**rka) :
                         print '{2} {0}():{1} '.format(
                                     mname(m),'\n  '.join(['']+mpaths),rm)
 
-                    route(mpaths,*mra,**mrka)(mcallback(m))
+                    (app.route if app else route)(mpaths,*mra,**mrka)(mcallback(m))
 
         # use wrapper to support stack multiple classroute
         def initwrap(path,cra,rka,baseinit) :
@@ -280,13 +232,12 @@ def classroute(*ra,**rka) :
                     routeinit(callback,p,cra,rka)
                 return callback
 
-            if not path :
-                path = list(yieldclassroutes(callback))
+            path = list(yieldclassroutes(callback,*makelist(path)))
             ritems = pathvars('','',callback.__name__)
             if ismethod(callback) :
                 ritems = pathvars(None,callback.im_class.__name__,**ritems)
             if path :
-                path = [_x.format( **ritems) for _x in makelist(path)]
+                path = [_x.format( **ritems) for _x in path]
 
             if DEBUG:
                 rm = rka.get('method',cra[0] if cra else 'route')
@@ -300,9 +251,12 @@ def classroute(*ra,**rka) :
 
     return decorator(callback) if callback else decorator
 
+# for single entry to import classroute
+classroute.route = mroute
+classroute.skip = skiproute
 
-if __name__ == '__main__':
-    # classroute Example
+if __name__ == '__main__':     # classroute Example
+
     debug() # enable verbose route path binding
 
     class A(object) :
@@ -336,18 +290,20 @@ if __name__ == '__main__':
     # bind to "/jane/hello","/jane/hello/<name>"
     classroute('jane')(A)('jane')
 
-    #with helper function "mroute" and "skiproute"
+    #with helper function "mroute" (or "classroute.route) and "skiproute" (or "classroute.skip")
     #fine tune for individual method in the class is possible.
-    # bind to "/b/hello","/b/hello/<name>","/b/say/hello","/b/say/hello/<name>"
+    # bind to "/B/hello","/B/hello/<name>","/B/say/hello","/B/say/hello/<name>"
     @classroute('{$class}')
     class B(A):
-        @mroute('{$root}/say/hello',['GET','POST'])
+        @classroute.route('{$root}/say/hello',['GET','POST'])
         def say__hi(self,name=None) :
               redirect('{$root}/hello/{0}',name or self.name,**self.__routeitems__)
 
-        @skiproute
-        def myfunc(self) :
+        @classroute.skip
+        def myfunc(self,name='') :
             yield 'myfunc'
+            if name :
+                yield ' ('+name+')'
 
     # or use as route replacement, with special meaning of 'index'
     # bind to "/","/index"
@@ -366,13 +322,14 @@ if __name__ == '__main__':
     classroute('{$class}-bottle')(A('Bottle').hello)
 
     # force late binding to @skiproute method
-    # bind to "/myfunc"
-    classroute(b.myfunc)
+    # bind to "/my","/my/:name"
+    classroute('/my/**')(b.myfunc)
 
     # also support for late binding to instance
     # bind to "/bottle/..."
     classroute('/bottle')(A('Bottle'))
 
-    # start server
+    #start server
     run()
+
 
